@@ -11,6 +11,7 @@ abstract class  Interceptor {
 
     public readonly input: PassThrough = new PassThrough();
     public readonly output: PassThrough = new PassThrough();
+    protected in: PromisifiedReadable = new PromisifiedReadable(this.input);
 
     constructor() {
     }
@@ -18,6 +19,23 @@ abstract class  Interceptor {
     abstract async work(): Promise<void>;
 
     isActive: boolean;
+
+    protected async emitOutput(line: string) {
+        await Q.nbind(this.output.write, this.output)(new Buffer(`${line}\n`, "utf-8"));
+    }
+
+    protected async expectInput(): Promise<string> {
+        let line = '';
+        while (true) {
+            let chunk = await this.in.read();
+            // @ts-ignore
+            let str = Buffer.from(chunk).toString("utf-8");
+            line += str;
+            if (_.last(str) === '\n') {
+                return line;
+            }
+        }
+    }
 }
 
 
@@ -25,43 +43,38 @@ abstract class  Interceptor {
 export class GetCommandInterceptor extends Interceptor {
 
     private buf = '';
-    private in: PromisifiedReadable;
+
     private active = false;
 
     constructor() {
         super();
-        this.in = new PromisifiedReadable(this.input);
     }
 
     public get isActive() {
         return this.active;
     }
 
-    private async executeCommand() {
-        await Q.nbind(this.output.write, this.output)(new Buffer("cat /tmp/server.log\n", "utf-8"));
+
+    private async executeCommand(filename: string) {
+        //obtain file size
+        await this.emitOutput(`ls -l ${filename} | awk '{print $5;}'`);
+
+
         //this.active = false;
     }
 
     async work() {
 
-
         while (true) {
-            let chunk = await this.in.read();
-            // @ts-ignore
-            let str = Buffer.from(chunk).toString("utf-8");
-            this.buf += str;
-            if (_.last(str) === '\n') {
-                let command = this.buf.match(/get (.*)/);
-                if (command) {
-                    //this.buf = `cat ${command[1]}\n`;
-                    console.log('command!');
-                    this.active = true;
-                    await this.executeCommand();
-                    //this.active = false;
-                }
-                this.buf = '';
-            }
+            let line = await this.expectInput();
 
+            let command = line.match(/get (.*)/);
+            if (command) {
+
+                this.active = true;
+                await this.executeCommand(command[1]);
+            }
+            this.buf = '';
         }
     }
 
