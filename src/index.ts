@@ -5,13 +5,18 @@ import * as stream from 'stream';
 import {PromisifiedReadable} from './utils';
 import {PassThrough, Readable} from "stream";
 import * as Q from "q";
-
+const fs = require('fs');
 
 abstract class  Interceptor {
 
     public readonly input: PassThrough = new PassThrough();
+    protected promIn: PromisifiedReadable = new PromisifiedReadable(this.input);
+    public readonly remoteInput: PassThrough = new PassThrough();
+
+    public readonly remoteOutput: PassThrough = new PassThrough();
+    protected promRemoteOut: PromisifiedReadable = new PromisifiedReadable(this.remoteOutput);
     public readonly output: PassThrough = new PassThrough();
-    protected in: PromisifiedReadable = new PromisifiedReadable(this.input);
+
 
     constructor() {
     }
@@ -20,14 +25,23 @@ abstract class  Interceptor {
 
     isActive: boolean;
 
-    protected async emitOutput(line: string) {
-        await Q.nbind(this.output.write, this.output)(new Buffer(`${line}\n`, "utf-8"));
+    private async emitTo(to: PassThrough, line: string) {
+        await Q.nbind(to.write, to)(new Buffer(`${line}\n`, "utf-8"));
     }
 
-    protected async expectInput(): Promise<string> {
+    protected async emitRemoteInput(line: string) {
+        await this.emitTo(this.remoteInput, line);
+        await this.expectFrom(this.promRemoteOut);//echoing
+    }
+
+    protected async emitOutput(line: string) {
+        await this.emitTo(this.output, line);
+    }
+
+    private async expectFrom(from: PromisifiedReadable) {
         let line = '';
         while (true) {
-            let chunk = await this.in.read();
+            let chunk = await from.read();
             // @ts-ignore
             let str = Buffer.from(chunk).toString("utf-8");
             line += str;
@@ -35,6 +49,14 @@ abstract class  Interceptor {
                 return line;
             }
         }
+    }
+
+    protected async expectInput(): Promise<string> {
+        return this.expectFrom(this.promIn);
+    }
+
+    protected async expectRemoteOutput(): Promise<string> {
+        return this.expectFrom(this.promRemoteOut);
     }
 }
 
@@ -55,12 +77,41 @@ export class GetCommandInterceptor extends Interceptor {
     }
 
 
-    private async executeCommand(filename: string) {
+    private async executeCommandInternal(filename: string) {
         //obtain file size
-        await this.emitOutput(`ls -l ${filename} | awk '{print $5;}'`);
+        await this.emitRemoteInput(`ls -l ${filename} | awk '{print $5;}'`);
+        let line = await this.expectRemoteOutput();
+        let siz = Number.parseInt(line);
+        if (Number.isNaN(siz)) {
+            await this.emitOutput("Can not find the file");
+            return;
+        }
 
+        //obtain file content
+        await this.emitRemoteInput(`cat ${filename}`);
 
+        var wstream = fs.createWriteStream('output.dat');
+
+        while (siz > 0) {
+            let chunk = await this.promRemoteOut.read();
+            siz -= (chunk.length);
+            console.log(`siz is ${siz}`);
+            await Q.nbind(wstream.write, wstream)(Buffer.from(chunk));
+        }
+
+        await wstream.close();
+
+        let iii = 123;
         //this.active = false;
+    }
+
+    private async executeCommand(filename: string) {
+        try {
+            await this.executeCommandInternal(filename);
+        } catch(e) {
+            console.error(e);
+        }
+        this.active = false;
     }
 
     async work() {
@@ -84,6 +135,7 @@ export class GetCommandInterceptor extends Interceptor {
 export class InputOutputFilter {
 
     private inputTransform: stream.Transform;
+    private outputTransform: stream.Transform;
 
     constructor(readonly interceptors: Interceptor[]) {
 
@@ -94,7 +146,13 @@ export class InputOutputFilter {
         let self = this;
         this.inputTransform = new class extends stream.Transform {
             _transform(chunk: any, encoding: string, cb: Function) {
-                self.readChunk(chunk, encoding);
+                self.readInputChunk(chunk, encoding);
+                cb();
+            }
+        };
+        this.outputTransform = new class extends stream.Transform {
+            _transform(chunk: any, encoding: string, cb: Function) {
+                self.readOutputChunk(chunk, encoding);
                 cb();
             }
         };
@@ -102,14 +160,25 @@ export class InputOutputFilter {
 
     private async startInterceptor(i: Interceptor) {
         i.work();
-        while (true) {
-            let out = new PromisifiedReadable(i.output);
-            let buf = await out.read();
-            this.inputTransform.push(buf, "utf-8");
-        }
+
+        (async (i:Interceptor) => {
+            let prom = new PromisifiedReadable(i.remoteInput);
+            while (true) {
+                let buf = await prom.read();
+                this.inputTransform.push(buf, "utf-8");
+            }
+        })(i);
+
+        (async (i:Interceptor) => {
+            let prom = new PromisifiedReadable(i.output);
+            while (true) {
+                let buf = await prom.read();
+                this.outputTransform.push(buf, "utf-8");
+            }
+        })(i);
     }
 
-    private readChunk(chunk: any, encoding: string) {
+    private readInputChunk(chunk: any, encoding: string) {
         for (let i of this.interceptors) {
             i.input.write(chunk, encoding);
         }
@@ -126,12 +195,33 @@ export class InputOutputFilter {
                 this.inputTransform.push(chunk, encoding);
             }
         })
+    }
 
+    private readOutputChunk(chunk: any, encoding: string) {
+        for (let i of this.interceptors) {
+            i.remoteOutput.write(chunk, encoding);
+        }
+
+        setImmediate(() => {
+            let haveActive = false;
+            for (let i of this.interceptors) {
+                if (i.isActive) {
+                    haveActive = true;
+                    break;
+                }
+            }
+            if (!haveActive) {
+                this.outputTransform.push(chunk, encoding);
+            }
+        })
     }
 
     public filterInput(input: any): any {
-        let self = this;
         return input.pipe(this.inputTransform);
+    }
+
+    public filterOutput(output: any): any {
+        return output.pipe(this.outputTransform);
     }
 }
 
@@ -168,11 +258,12 @@ async function main() {
 
         let chan = await ssh.shell();
 
-        chan.stdout.pipe(process.stdout);
+        //chan.stdout.pipe(process.stdout);
         chan.stderr.pipe(process.stderr);
 
         let filter = new InputOutputFilter([new GetCommandInterceptor()]);
         filter.filterInput(process.stdin).pipe(chan.stdin);
+        filter.filterOutput(chan.stdout).pipe(process.stdout);
 
         // process.stdin
         //     //.pipe(new TransformInput())
