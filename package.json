@@ -1,0 +1,18 @@
+{
+  "name": "ssh",
+  "version": "1.0.0",
+  "description": "test task",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "keywords": [
+    "ssh",
+    "client",
+    "test",
+    "task",
+    "rvision"
+  ],
+  "author": "Andrey Kozhevnikov",
+  "license": "ISC"
+}
