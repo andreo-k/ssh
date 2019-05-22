@@ -22,7 +22,7 @@ export abstract class  Interceptor {
 
     isActive: boolean;
 
-    private async emitTo(to: PassThrough, line: string) {
+    protected async emitTo(to: PassThrough, line: string) {
         await Q.nbind(to.write, to)(Buffer.from(`${line}\n`, "utf-8"));
     }
 
@@ -134,7 +134,7 @@ export class InputOutputFilter {
     }
 
     private readOutputChunk(chunk: any, encoding: string) {
-        for (let i of this.interceptors) {            
+        for (let i of this.interceptors) {
             i.remoteOutput.write(chunk, encoding);
         }
 

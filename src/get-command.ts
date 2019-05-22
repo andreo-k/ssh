@@ -20,6 +20,10 @@ export class GetCommandInterceptor extends Interceptor {
     private async executeCommandInternal(filename: string) {
         this.promRemoteOut.read();//abandon past output
         //obtain file size
+        let localFilename = filename;
+        if (filename.lastIndexOf('/') != -1) {
+            localFilename = filename.substr(filename.lastIndexOf('/')+1);
+        }
         await this.emitRemoteInput(`ls -l ${filename} | awk '{print $5;}'`);
         let line = await this.expectRemoteOutputNotEmpty();
         let siz = Number.parseInt(line);
@@ -31,7 +35,7 @@ export class GetCommandInterceptor extends Interceptor {
         //obtain file content
         await this.emitRemoteInput(`base64 ${filename}`);
 
-        var wstream = fs.createWriteStream('output.dat');
+        var wstream = fs.createWriteStream(localFilename);
 
         let last: any = [];
 
@@ -60,6 +64,7 @@ export class GetCommandInterceptor extends Interceptor {
             console.error(e);
         }
         this.active = false;
+        await this.emitTo(this.remoteInput, '\n');
     }
 
     async work() {
