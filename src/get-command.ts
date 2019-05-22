@@ -51,9 +51,6 @@ export class GetCommandInterceptor extends Interceptor {
 
 
         await wstream.close();
-
-        let iii = 123;
-        //this.active = false;
     }
 
     private async executeCommand(filename: string) {
