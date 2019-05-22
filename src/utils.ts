@@ -1,6 +1,7 @@
 import * as stream from "stream";
 import * as Q from "q";
 
+var total = 0;
 export class PromisifiedReadable {
 
     private s: stream.Readable;
@@ -8,17 +9,29 @@ export class PromisifiedReadable {
     private error: Error | null = null;
     private end_: boolean = false;
     private closed_: boolean = false;
+    private buf: any = null;
 
-    constructor(s: stream.Readable) {
+    constructor(s: stream.Readable, readonly name?: string) {
         this.s = s;
         this.readDefer = Q.defer<Buffer>();
 
         let self = this;
         s.on('readable', async function (){
+            if (name !== null) {
+                console.log(`readable ${name}`);
+            }
+
             if (self.readDefer) {
                 let d = self.readDefer;
                 self.readDefer = null;
                 d.resolve(s.read());
+            } else {
+                if (self.buf) {
+                    self.buf = Buffer.concat([self.buf, s.read()]);
+                } else {
+                    self.buf = s.read();
+                }
+                console.log(`preved!`);
             }
         });
 
@@ -52,6 +65,16 @@ export class PromisifiedReadable {
     public read(): Q.Promise<Buffer> {
         if (this.error)
             return Q.reject<Buffer>(this.error);
+
+        if (this.buf) {
+            let tmp = this.s.read();
+            if (tmp) {
+                this.buf = Buffer.concat([this.buf, tmp]);
+            }
+            tmp = this.buf;
+            this.buf = null;
+            return Q.resolve<Buffer>(tmp);
+        }
 
         let buf = this.s.read();
 

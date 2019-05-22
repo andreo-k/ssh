@@ -28,18 +28,41 @@ export class GetCommandInterceptor extends Interceptor {
         }
 
         //obtain file content
+        //await this.emitRemoteInput(`base64 ${filename}`);
         await this.emitRemoteInput(`base64 ${filename}`);
 
         var wstream = fs.createWriteStream('output.dat');
 
+        let last = null;
 
         while (siz > 0) {
-            line = await this.expectRemoteOutput();
-            line = line.replace(/\n|\r/g, '');
-            let buf = Buffer.from(line, 'base64');
-            siz-= buf.length;
-            console.log(`siz is ${siz}`);
-            await Q.nbind(wstream.write, wstream)(buf);
+            let chunk = await this.promRemoteOut.read();
+            if (last == null) {
+                last = chunk;
+            } else {
+                last = Buffer.concat([last, chunk]);
+            }
+
+            let pos = last.lastIndexOf(13);
+            if (pos != -1) {
+
+            }
+            if (chunk.length > siz) {
+
+                let tail = chunk.slice(siz, chunk.length);
+                chunk = chunk.slice(0, siz);
+                await this.output.write(tail);
+            }
+            siz-= chunk.length;
+            await Q.nbind(wstream.write, wstream)(chunk);
+            console.log(`Remaining ${siz} bytes`);
+
+            // line = await this.expectRemoteOutput();
+            // line = line.replace(/\n|\r/g, '');
+            // let buf = Buffer.from(line, 'base64');
+            // siz-= buf.length;
+            // console.log(`Remaining ${siz} bytes`);
+            // await Q.nbind(wstream.write, wstream)(buf);
         }
 
 

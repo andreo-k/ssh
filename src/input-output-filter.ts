@@ -11,7 +11,7 @@ export abstract class  Interceptor {
     public readonly remoteInput: PassThrough = new PassThrough();
 
     public readonly remoteOutput: PassThrough = new PassThrough();
-    protected promRemoteOut: PromisifiedReadable = new PromisifiedReadable(this.remoteOutput);
+    protected promRemoteOut: PromisifiedReadable = new PromisifiedReadable(this.remoteOutput, 'remoteOutput');
     public readonly output: PassThrough = new PassThrough();
 
 
@@ -28,7 +28,7 @@ export abstract class  Interceptor {
 
     protected async emitRemoteInput(line: string) {
         await this.emitTo(this.remoteInput, line);
-        await this.expectFrom(this.promRemoteOut);//echoing
+        //await this.expectFrom(this.promRemoteOut);//echoing
     }
 
     protected async emitOutput(line: string) {
@@ -42,7 +42,8 @@ export abstract class  Interceptor {
             // @ts-ignore
             let str = Buffer.from(chunk).toString("utf-8");
             line += str;
-            if (_.last(str) === '\n') {
+            console.log(`expectFrom read chunk of ${chunk.length} bytes. line is ${line}`);
+            if (_.last(str) === '\n' || _.last(str) === '\r') {
                 return line;
             }
         }
@@ -56,6 +57,8 @@ export abstract class  Interceptor {
         return this.expectFrom(this.promRemoteOut);
     }
 }
+
+var totalRemoteOutBytes = 0;
 
 export class InputOutputFilter {
 
@@ -123,7 +126,10 @@ export class InputOutputFilter {
     }
 
     private readOutputChunk(chunk: any, encoding: string) {
+        totalRemoteOutBytes += chunk.length;
+        console.log(`from remote output. len=${chunk.length} total=${totalRemoteOutBytes}`);//content=${chunk.toString('utf-8')}
         for (let i of this.interceptors) {
+            console.log(`write to remote output`);
             i.remoteOutput.write(chunk, encoding);
         }
 
