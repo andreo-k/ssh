@@ -18,9 +18,10 @@ export class GetCommandInterceptor extends Interceptor {
 
 
     private async executeCommandInternal(filename: string) {
+        this.promRemoteOut.read();//abandon past output
         //obtain file size
         await this.emitRemoteInput(`ls -l ${filename} | awk '{print $5;}'`);
-        let line = await this.expectRemoteOutput();
+        let line = await this.expectRemoteOutputNotEmpty();
         let siz = Number.parseInt(line);
         if (Number.isNaN(siz)) {
             await this.emitOutput("Can not find the file");
@@ -28,41 +29,24 @@ export class GetCommandInterceptor extends Interceptor {
         }
 
         //obtain file content
-        //await this.emitRemoteInput(`base64 ${filename}`);
         await this.emitRemoteInput(`base64 ${filename}`);
 
         var wstream = fs.createWriteStream('output.dat');
 
-        let last = null;
+        let last: any = [];
 
         while (siz > 0) {
-            let chunk = await this.promRemoteOut.read();
-            if (last == null) {
-                last = chunk;
+            let chunk = await this.promRemoteOut.read(1);
+            if (chunk[0]==10 || chunk[0]==13) {
+                let base64line = Buffer.from(last).toString("utf-8");
+                let buf = Buffer.from(base64line, 'base64');
+                last = [];
+                siz-= buf.length;
+                await Q.nbind(wstream.write, wstream)(buf);
+                console.log(`Remaining ${siz} bytes`);
             } else {
-                last = Buffer.concat([last, chunk]);
+                last.push(chunk[0]);
             }
-
-            let pos = last.lastIndexOf(13);
-            if (pos != -1) {
-
-            }
-            if (chunk.length > siz) {
-
-                let tail = chunk.slice(siz, chunk.length);
-                chunk = chunk.slice(0, siz);
-                await this.output.write(tail);
-            }
-            siz-= chunk.length;
-            await Q.nbind(wstream.write, wstream)(chunk);
-            console.log(`Remaining ${siz} bytes`);
-
-            // line = await this.expectRemoteOutput();
-            // line = line.replace(/\n|\r/g, '');
-            // let buf = Buffer.from(line, 'base64');
-            // siz-= buf.length;
-            // console.log(`Remaining ${siz} bytes`);
-            // await Q.nbind(wstream.write, wstream)(buf);
         }
 
 

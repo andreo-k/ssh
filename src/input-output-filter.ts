@@ -11,7 +11,7 @@ export abstract class  Interceptor {
     public readonly remoteInput: PassThrough = new PassThrough();
 
     public readonly remoteOutput: PassThrough = new PassThrough();
-    protected promRemoteOut: PromisifiedReadable = new PromisifiedReadable(this.remoteOutput, 'remoteOutput');
+    protected promRemoteOut: PromisifiedReadable = new PromisifiedReadable(this.remoteOutput);
     public readonly output: PassThrough = new PassThrough();
 
 
@@ -28,7 +28,8 @@ export abstract class  Interceptor {
 
     protected async emitRemoteInput(line: string) {
         await this.emitTo(this.remoteInput, line);
-        //await this.expectFrom(this.promRemoteOut);//echoing
+        // echoing
+        await this.expectRemoteOutputNotEmpty();
     }
 
     protected async emitOutput(line: string) {
@@ -36,16 +37,16 @@ export abstract class  Interceptor {
     }
 
     private async expectFrom(from: PromisifiedReadable) {
-        let line = '';
+        let line = null;
         while (true) {
-            let chunk = await from.read();
-            // @ts-ignore
-            let str = Buffer.from(chunk).toString("utf-8");
-            line += str;
-            console.log(`expectFrom read chunk of ${chunk.length} bytes. line is ${line}`);
-            if (_.last(str) === '\n' || _.last(str) === '\r') {
-                return line;
+            let chunk = await from.read(1);
+            if (chunk[0] == 10 || chunk[0] == 13) {
+                if (line == null) {
+                    return '';
+                }
+                return line.toString("utf-8");
             }
+            line = (line === null) ? chunk : Buffer.concat([line, chunk]);
         }
     }
 
@@ -55,6 +56,15 @@ export abstract class  Interceptor {
 
     protected async expectRemoteOutput(): Promise<string> {
         return this.expectFrom(this.promRemoteOut);
+    }
+
+    protected async expectRemoteOutputNotEmpty(): Promise<string> {
+        while (true) {
+            let line = await this.expectFrom(this.promRemoteOut);
+            if (_.isEmpty(line))
+                continue;
+            return line;
+        }
     }
 }
 
@@ -126,10 +136,8 @@ export class InputOutputFilter {
     }
 
     private readOutputChunk(chunk: any, encoding: string) {
-        totalRemoteOutBytes += chunk.length;
-        console.log(`from remote output. len=${chunk.length} total=${totalRemoteOutBytes}`);//content=${chunk.toString('utf-8')}
-        for (let i of this.interceptors) {
-            console.log(`write to remote output`);
+        totalRemoteOutBytes += chunk.length;        
+        for (let i of this.interceptors) {            
             i.remoteOutput.write(chunk, encoding);
         }
 
