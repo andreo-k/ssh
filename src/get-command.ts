@@ -18,9 +18,10 @@ export class GetCommandInterceptor extends Interceptor {
 
 
     private async executeCommandInternal(filename: string) {
+        this.promRemoteOut.read();//abandon past output
         //obtain file size
         await this.emitRemoteInput(`ls -l ${filename} | awk '{print $5;}'`);
-        let line = await this.expectRemoteOutput();
+        let line = await this.expectRemoteOutputNotEmpty();
         let siz = Number.parseInt(line);
         if (Number.isNaN(siz)) {
             await this.emitOutput("Can not find the file");
@@ -32,14 +33,20 @@ export class GetCommandInterceptor extends Interceptor {
 
         var wstream = fs.createWriteStream('output.dat');
 
+        let last: any = [];
 
         while (siz > 0) {
-            line = await this.expectRemoteOutput();
-            line = line.replace(/\n|\r/g, '');
-            let buf = Buffer.from(line, 'base64');
-            siz-= buf.length;
-            console.log(`siz is ${siz}`);
-            await Q.nbind(wstream.write, wstream)(buf);
+            let chunk = await this.promRemoteOut.read(1);
+            if (chunk[0]==10 || chunk[0]==13) {
+                let base64line = Buffer.from(last).toString("utf-8");
+                let buf = Buffer.from(base64line, 'base64');
+                last = [];
+                siz-= buf.length;
+                await Q.nbind(wstream.write, wstream)(buf);
+                console.log(`Remaining ${siz} bytes`);
+            } else {
+                last.push(chunk[0]);
+            }
         }
 
 

@@ -28,7 +28,8 @@ export abstract class  Interceptor {
 
     protected async emitRemoteInput(line: string) {
         await this.emitTo(this.remoteInput, line);
-        await this.expectFrom(this.promRemoteOut);//echoing
+        // echoing
+        await this.expectRemoteOutputNotEmpty();
     }
 
     protected async emitOutput(line: string) {
@@ -36,15 +37,16 @@ export abstract class  Interceptor {
     }
 
     private async expectFrom(from: PromisifiedReadable) {
-        let line = '';
+        let line = null;
         while (true) {
-            let chunk = await from.read();
-            // @ts-ignore
-            let str = Buffer.from(chunk).toString("utf-8");
-            line += str;
-            if (_.last(str) === '\n') {
-                return line;
+            let chunk = await from.read(1);
+            if (chunk[0] == 10 || chunk[0] == 13) {
+                if (line == null) {
+                    return '';
+                }
+                return line.toString("utf-8");
             }
+            line = (line === null) ? chunk : Buffer.concat([line, chunk]);
         }
     }
 
@@ -54,6 +56,15 @@ export abstract class  Interceptor {
 
     protected async expectRemoteOutput(): Promise<string> {
         return this.expectFrom(this.promRemoteOut);
+    }
+
+    protected async expectRemoteOutputNotEmpty(): Promise<string> {
+        while (true) {
+            let line = await this.expectFrom(this.promRemoteOut);
+            if (_.isEmpty(line))
+                continue;
+            return line;
+        }
     }
 }
 
@@ -123,7 +134,7 @@ export class InputOutputFilter {
     }
 
     private readOutputChunk(chunk: any, encoding: string) {
-        for (let i of this.interceptors) {
+        for (let i of this.interceptors) {            
             i.remoteOutput.write(chunk, encoding);
         }
 

@@ -5,6 +5,7 @@ export class PromisifiedReadable {
 
     private s: stream.Readable;
     private readDefer: Q.Deferred<Buffer> | null = null;
+    private readSize?: number;
     private error: Error | null = null;
     private end_: boolean = false;
     private closed_: boolean = false;
@@ -18,7 +19,8 @@ export class PromisifiedReadable {
             if (self.readDefer) {
                 let d = self.readDefer;
                 self.readDefer = null;
-                d.resolve(s.read());
+                d.resolve(s.read(self.readSize));
+                self.readSize = undefined;
             }
         });
 
@@ -49,11 +51,12 @@ export class PromisifiedReadable {
 
     }
 
-    public read(): Q.Promise<Buffer> {
+    public read(size?: number): Q.Promise<Buffer> {
         if (this.error)
             return Q.reject<Buffer>(this.error);
 
-        let buf = this.s.read();
+        this.readSize = size;
+        let buf = this.s.read(size);
 
         if (buf || this.end_ || this.closed_) {
             return Q.resolve<Buffer>(buf);
