@@ -18,7 +18,10 @@ export class GetCommandInterceptor extends Interceptor {
 
 
     private async executeCommandInternal(filename: string) {
-        this.promRemoteOut.read();//abandon past output
+
+        //abandon past output
+        while (this.remoteOutput.read() !== null) {
+        }
         //obtain file size
         let localFilename = filename;
         if (filename.lastIndexOf('/') != -1) {
