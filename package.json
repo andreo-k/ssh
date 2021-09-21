@@ -50,7 +50,7 @@
     "request": "^2.88.0",
     "request-promise-native": "^1.0.5",
     "socks-proxy-agent": "^4.0.1",
-    "ssh2": "^0.8.4",
+    "ssh2": "^1.4.0",
     "ssh2-promise": "^0.1.5",
     "underscore": "^1.9.1",
     "validatorjs": "^3.14.2",
